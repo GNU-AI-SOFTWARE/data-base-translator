@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileCopyrightText: 2026 Claire Ivanenka <claire@gnu-ai.org>
 
-AC_INIT([data-base-translator], [0.1.0], [claire@gnu-ai.org])
+AC_INIT([data-base-translator], m4_esyscmd([cat VERSION | tr -d ' 
+']), [claire@gnu-ai.org])
 AC_CONFIG_SRCDIR([src/main.c])
 AM_INIT_AUTOMAKE([-Wall -Werror foreign subdir-objects])
 
