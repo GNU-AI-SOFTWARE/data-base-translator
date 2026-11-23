@@ -15,7 +15,8 @@ set -u
 # the mounted trivfs translator); everywhere else db-translator
 # IS the verification binary.
 BINARY="${1:-../src/db-translator}"
-if [ -z "${1:-}" ] && [ -x ../src/db-translator-repl ]; then
+if [ -z "${1:-}" ] && [ -x ../src/db-translator-repl ] \
+   && ../src/db-translator-repl --version >/dev/null 2>&1; then
     BINARY=../src/db-translator-repl
 fi
 FAIL=0

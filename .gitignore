@@ -88,3 +88,7 @@ src/db-translator
 
 # Out-of-tree build directory
 /build/
+
+# Never commit build products
+/src/db-translator-repl
+/tests/test_contract
