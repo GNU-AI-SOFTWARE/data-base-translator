@@ -417,6 +417,22 @@ et ne les modifie pas sans revue conjointe.
 - Documentation utilisateur et architecture (`docs/architecture.md`).
 - **Livrable** : version 1.0.
 
+### Phase 7 — `training_data` comme mémoire du LLM
+
+- `training_data` servie en lecture paginée et bornée pour l'ancrage :
+  recherche par mots-clés des extraits cités dans `params.context`
+  (inference phase 9) et servis à `/reply` (phase 10).
+- Table de feedback : `/good` / `/bad` du client écrivent la paire
+  {prompt, réponse, note} ; `/entrainement --from-feedback` la réingère
+  et versionne le modèle `.nn` — la boucle `/db` → `.nn` → `/llm1…N` →
+  `/reply` se ferme.
+- **Livrable** : lectures paginées de `training_data` + table feedback +
+  procédures.
+- **Acceptation** : chaque réponse citée est relisible en POSIX pur
+  (`cat /db/training_data/<id>`, checksum SHA-256 vérifiable) ;
+  `make check` vert.
+- **Dépend de** : phases 1–3 + inference phases 9–10.
+
 ---
 
 ## 6. Schéma PostgreSQL (gelé côté orchestrateur et inference, implémenté ici)
@@ -561,6 +577,7 @@ CREATE TABLE IF NOT EXISTS auth_failures (
 | 4 | Rejouabilité, exports, historique SQL | 2, 3 | orchestrateur phase 4 |
 | 5 | Registre de clés SSH : `users`, `access_keys`, `auth_failures` | 1 | inference phase 5 |
 | 6 | Durcissement, CI Hurd, v1.0 | 1–5 | orchestrateur phase 6, inference phase 7 |
+| 7 | `training_data` servie pour l'ancrage + feedback `/good`/`/bad` | 3 + inference 9–10 | pile LLM |
 
 Les jalons 1→2 et 1→3 peuvent avancer en parallèle, comme les fils
 de travail de l'orchestrateur. La base de données n'est pas un
