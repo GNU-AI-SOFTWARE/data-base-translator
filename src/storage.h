@@ -57,6 +57,9 @@ enum dbt_storage_status dbt_insert_run_instances (
 enum dbt_storage_status dbt_insert_incidents (
                                const struct dbt_row_incident *row,
                                          long long *id);
+enum dbt_storage_status dbt_insert_aggregator_state (
+                               const struct dbt_row_aggregator *row,
+                                         long long *id);
 enum dbt_storage_status dbt_insert_ingest_jobs (
                                const struct dbt_row_ingest *row,
                                          long long *id);

@@ -55,6 +55,7 @@ static struct
 #define STMT_INS_TRAINING   "dbt_ins_training_data"
 #define STMT_INS_INCIDENTS  "dbt_ins_incidents"
 #define STMT_INS_INGEST     "dbt_ins_ingest_jobs"
+#define STMT_INS_AGG        "dbt_ins_aggregator_state"
 #define STMT_SEL_CHECKSUM   "dbt_sel_checksum"
 
 /* PostgreSQL type OIDs, so the server never has to infer: the
@@ -117,10 +118,14 @@ prepare_statements (void)
   static const char ins_ing_sql[] =
     "INSERT INTO ingest_jobs (source_url, status, records_added)"
     " VALUES ($1, $2, $3) RETURNING id";
+  static const Oid ins_agg_types[3] = { OID_TEXT, OID_FLOAT4, OID_INT4 };
+  static const char ins_agg_sql[] =
+    "INSERT INTO aggregator_state (topology, weight, version)"
+    " VALUES ($1, $2, $3) RETURNING id";
   static const char sel_sql[] =
     "SELECT id FROM training_data WHERE checksum = $1";
 
-  PGresult *res[6];
+  PGresult *res[7];
   bool ok = true;
 
   res[0] = PQprepare (pg.conn, STMT_INS_RUNS, ins_runs_sql, 3,
@@ -135,8 +140,10 @@ prepare_statements (void)
                       sel_types);
   res[5] = PQprepare (pg.conn, STMT_INS_INGEST, ins_ing_sql, 3,
                       ins_ing_types);
+  res[6] = PQprepare (pg.conn, STMT_INS_AGG, ins_agg_sql, 3,
+                      ins_agg_types);
 
-  for (int i = 0; i < 6; i++)
+  for (int i = 0; i < 7; i++)
     {
       if (res[i] == NULL || PQresultStatus (res[i]) != PGRES_COMMAND_OK)
         ok = false;
@@ -494,6 +501,11 @@ static const struct sel_col sel_ingest[] =
     { "detected_at", SEL_TEXT }, { "status", SEL_TEXT },
     { "records_added", SEL_NUM }, { NULL, 0 }
   };
+static const struct sel_col sel_agg[] =
+  {
+    { "id", SEL_NUM }, { "topology", SEL_TEXT }, { "weight", SEL_NUM },
+    { "version", SEL_NUM }, { "updated_at", SEL_TEXT }, { NULL, 0 }
+  };
 
 /* Append S to OUT as a JSON string (with quotes, escaped). */
 static size_t
@@ -545,7 +557,7 @@ pg_select (enum dbt_table table, const char *where_col,
 {
   static const char *const tbl_name[] =
     { "", "runs", "run_instances", "training_data", "incidents",
-      "ingest_jobs" };
+      "ingest_jobs", "aggregator_state" };
   const struct sel_col *cols;
   char sql[512];
   char limit_buf[24];
@@ -556,7 +568,7 @@ pg_select (enum dbt_table table, const char *where_col,
   size_t len = 0;
   long n;
 
-  if (table <= DBT_TABLE_NONE || table > DBT_TABLE_INGEST_JOBS)
+  if (table <= DBT_TABLE_NONE || table > DBT_TABLE_AGGREGATOR_STATE)
     return DBT_ST_INVALID;
 
   switch (table)
@@ -565,6 +577,7 @@ pg_select (enum dbt_table table, const char *where_col,
     case DBT_TABLE_RUN_INSTANCES: cols = sel_instances; break;
     case DBT_TABLE_INCIDENTS:     cols = sel_incidents; break;
     case DBT_TABLE_INGEST_JOBS:   cols = sel_ingest; break;
+    case DBT_TABLE_AGGREGATOR_STATE: cols = sel_agg; break;
     default:                      cols = sel_training; break;
     }
 
@@ -686,6 +699,23 @@ pg_insert_ingest (const struct dbt_row_ingest *row, long long *id)
   values[1] = row->status;
   values[2] = nbuf;
   return exec_prepared_id (STMT_INS_INGEST, values, lengths, 3, id);
+}
+
+enum dbt_storage_status
+pg_insert_aggregator (const struct dbt_row_aggregator *row,
+                      long long *id)
+{
+  char wbuf[32];
+  char vbuf[24];
+  const char *values[3];
+  const int lengths[3] = { 0, 0, 0 };
+
+  snprintf (wbuf, sizeof wbuf, "%.6f", row->weight);
+  snprintf (vbuf, sizeof vbuf, "%ld", row->version);
+  values[0] = row->topology;
+  values[1] = wbuf;
+  values[2] = vbuf;
+  return exec_prepared_id (STMT_INS_AGG, values, lengths, 3, id);
 }
 
 bool

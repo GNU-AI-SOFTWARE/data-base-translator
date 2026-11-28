@@ -62,6 +62,16 @@ CREATE TABLE IF NOT EXISTS ingest_jobs (
     records_added INT NOT NULL DEFAULT 0
 );
 
+-- Learned aggregation weights (phase A4): append-only, the latest
+-- version of a topology is its current weight.
+CREATE TABLE IF NOT EXISTS aggregator_state (
+    id          BIGSERIAL PRIMARY KEY,
+    topology    TEXT NOT NULL,                -- e.g. "10,20,5"
+    weight      REAL NOT NULL,                -- learned aggregation weight
+    version     INT NOT NULL DEFAULT 1,       -- monotonic per topology
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- Users allowed in the remote mode (inference-translator)
 CREATE TABLE IF NOT EXISTS users (
     id          BIGSERIAL PRIMARY KEY,

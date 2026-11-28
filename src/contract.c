@@ -738,6 +738,58 @@ bind_ingest (const struct field *fields, int nfields,
   return 0;
 }
 
+/* aggregator_state (phase A4): learned aggregation weights. */
+static int
+bind_aggregator (const struct field *fields, int nfields,
+                 struct dbt_request *req)
+{
+  const struct field *t = find (fields, nfields, "topology");
+  const struct field *w = find (fields, nfields, "weight");
+  const struct field *v = find (fields, nfields, "version");
+  struct dbt_row_aggregator *r = &req->row.aggregator;
+
+  if (t == NULL || t->type != F_STR)
+    {
+      req->invalid = t == NULL ? DBT_INVALID_FIELD : DBT_INVALID_TYPE;
+      strcpy (req->invalid_detail, "topology");
+      return -1;
+    }
+  r->topology = t->str;
+  if (w == NULL || w->type != F_NUM)
+    {
+      req->invalid = w == NULL ? DBT_INVALID_FIELD : DBT_INVALID_TYPE;
+      strcpy (req->invalid_detail, "weight");
+      return -1;
+    }
+  r->weight = strtod (w->num, NULL);
+  if (v == NULL || v->type != F_NUM)
+    {
+      req->invalid = v == NULL ? DBT_INVALID_FIELD : DBT_INVALID_TYPE;
+      strcpy (req->invalid_detail, "version");
+      return -1;
+    }
+  r->version = strtol (v->num, NULL, 10);
+  if (r->version < 1)
+    {
+      req->invalid = DBT_INVALID_VALUE;
+      strcpy (req->invalid_detail, "version");
+      return -1;
+    }
+  for (int i = 0; i < nfields; i++)
+    {
+      const char *k = fields[i].key;
+
+      if (strcmp (k, "topology") != 0 && strcmp (k, "weight") != 0
+          && strcmp (k, "version") != 0)
+        {
+          req->invalid = DBT_INVALID_KEY;
+          set_detail (req, k);
+          return -1;
+        }
+    }
+  return 0;
+}
+
 static int
 bind_runs (const struct field *fields, int nfields,
            struct dbt_request *req)
@@ -1301,6 +1353,8 @@ dbt_parse (const char *line, size_t len,
         { "id", "checksum", NULL };
       static const char *const cols_ingest[] =
         { "id", "source_url", NULL };
+      static const char *const cols_agg[] =
+        { "id", "topology", NULL };
       const char *const *cols = NULL;
 
       if (have_row)
@@ -1333,6 +1387,11 @@ dbt_parse (const char *line, size_t len,
         {
           req->table = DBT_TABLE_INGEST_JOBS;
           cols = cols_ingest;
+        }
+      else if (strcmp (table_name, "aggregator_state") == 0)
+        {
+          req->table = DBT_TABLE_AGGREGATOR_STATE;
+          cols = cols_agg;
         }
       else
         {
@@ -1400,6 +1459,12 @@ dbt_parse (const char *line, size_t len,
     {
       req->table = DBT_TABLE_INGEST_JOBS;
       if (bind_ingest (fields, nfields, req) < 0)
+        return;
+    }
+  else if (strcmp (table_name, "aggregator_state") == 0)
+    {
+      req->table = DBT_TABLE_AGGREGATOR_STATE;
+      if (bind_aggregator (fields, nfields, req) < 0)
         return;
     }
   else

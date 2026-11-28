@@ -51,6 +51,7 @@ enum dbt_table
     DBT_TABLE_TRAINING_DATA,
     DBT_TABLE_INCIDENTS,
     DBT_TABLE_INGEST_JOBS,   /* phase B3: /entrainement --from journal */
+    DBT_TABLE_AGGREGATOR_STATE, /* phase A4: learned weights */
   };
 
 /* --- Machine readable reasons of the "invalid" response -------------- */
@@ -120,6 +121,13 @@ struct dbt_row_ingest
     long        records_added;        /* required, >= 0 */
   };
 
+struct dbt_row_aggregator
+  {
+    const char *topology;             /* required */
+    double      weight;               /* required */
+    long        version;              /* required, >= 1 */
+  };
+
 struct dbt_request
   {
     enum dbt_kind   kind;
@@ -135,6 +143,7 @@ struct dbt_request
         struct dbt_row_training   training;
         struct dbt_row_incident   incidents;
         struct dbt_row_ingest     ingest;
+        struct dbt_row_aggregator aggregator;
       } row;
     /* When kind is DBT_REQ_SELECT: an optional single-column equality
      * filter.  Both strings reference the parse arena; the column is

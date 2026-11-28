@@ -119,6 +119,16 @@ dbt_schema_ddl (void)
     "    records_added INT NOT NULL DEFAULT 0\n"
     ");\n"
     "\n"
+    "-- Learned aggregation weights (phase A4): append-only, the latest\n"
+    "-- version of a topology is its current weight.\n"
+    "CREATE TABLE IF NOT EXISTS aggregator_state (\n"
+    "    id          BIGSERIAL PRIMARY KEY,\n"
+    "    topology    TEXT NOT NULL,                -- e.g. \"10,20,5\"\n"
+    "    weight      REAL NOT NULL,                -- learned aggregation weight\n"
+    "    version     INT NOT NULL DEFAULT 1,       -- monotonic per topology\n"
+    "    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()\n"
+    ");\n"
+    "\n"
     "-- Users allowed in the remote mode (inference-translator)\n"
     "CREATE TABLE IF NOT EXISTS users (\n"
     "    id          BIGSERIAL PRIMARY KEY,\n"
@@ -277,6 +287,24 @@ dbt_insert_incidents (const struct dbt_row_incident *row, long long *id)
 
 #ifdef HAVE_LIBPQ
   st = pg_insert_incidents (row, id);
+#else
+  (void) row;
+  (void) id;
+  st = unavailable ();
+#endif
+  if (st == DBT_ST_INVALID)
+    dbt_state.counters.invalid++;
+  return st;
+}
+
+enum dbt_storage_status
+dbt_insert_aggregator_state (const struct dbt_row_aggregator *row,
+                             long long *id)
+{
+  enum dbt_storage_status st;
+
+#ifdef HAVE_LIBPQ
+  st = pg_insert_aggregator (row, id);
 #else
   (void) row;
   (void) id;
