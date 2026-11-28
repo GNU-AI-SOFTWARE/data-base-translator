@@ -52,6 +52,9 @@ enum dbt_storage_status dbt_insert_runs (const struct dbt_row_runs *row,
 enum dbt_storage_status dbt_insert_run_instances (
                                 const struct dbt_row_instances *row,
                                 long long *id);
+enum dbt_storage_status dbt_insert_incidents (
+                               const struct dbt_row_incident *row,
+                                         long long *id);
 enum dbt_storage_status dbt_insert_training_data (
                                 const struct dbt_row_training *row,
                                 long long *id);

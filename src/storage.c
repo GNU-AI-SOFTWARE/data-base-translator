@@ -237,6 +237,23 @@ dbt_insert_run_instances (const struct dbt_row_instances *row,
 }
 
 enum dbt_storage_status
+dbt_insert_incidents (const struct dbt_row_incident *row, long long *id)
+{
+  enum dbt_storage_status st;
+
+#ifdef HAVE_LIBPQ
+  st = pg_insert_incidents (row, id);
+#else
+  (void) row;
+  (void) id;
+  st = unavailable ();
+#endif
+  if (st == DBT_ST_INVALID)
+    dbt_state.counters.invalid++;
+  return st;
+}
+
+enum dbt_storage_status
 dbt_insert_training_data (const struct dbt_row_training *row,
                           long long *id)
 {

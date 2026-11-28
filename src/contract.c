@@ -641,6 +641,42 @@ find (const struct field *fields, int nfields, const char *key)
  * the caller learns exactly what to fix in its next line. */
 
 static int
+bind_incidents (const struct field *fields, int nfields,
+                struct dbt_request *req)
+{
+  const struct field *rid = find (fields, nfields, "run_id");
+  const struct field *iid = find (fields, nfields, "instance_id");
+  const struct field *k = find (fields, nfields, "kind");
+  struct dbt_row_incident *r = &req->row.incidents;
+
+  if (rid == NULL || rid->type != F_NUM)
+    {
+      req->invalid = rid == NULL ? DBT_INVALID_FIELD : DBT_INVALID_TYPE;
+      strcpy (req->invalid_detail, "run_id");
+      return -1;
+    }
+  r->run_id = strtoll (rid->num, NULL, 10);
+  if (iid != NULL && iid->type == F_NUM)
+    {
+      r->has_instance_id = true;
+      r->instance_id = strtoll (iid->num, NULL, 10);
+    }
+  else
+    {
+      r->has_instance_id = false;
+      r->instance_id = 0;
+    }
+  if (k == NULL || k->type != F_STR)
+    {
+      req->invalid = k == NULL ? DBT_INVALID_FIELD : DBT_INVALID_TYPE;
+      strcpy (req->invalid_detail, "kind");
+      return -1;
+    }
+  r->kind = k->str;
+  return 0;
+}
+
+static int
 bind_runs (const struct field *fields, int nfields,
            struct dbt_request *req)
 {
@@ -1106,6 +1142,12 @@ dbt_parse (const char *line, size_t len,
     {
       req->table = DBT_TABLE_TRAINING_DATA;
       if (bind_training (fields, nfields, req) < 0)
+        return;
+    }
+  else if (strcmp (table_name, "incidents") == 0)
+    {
+      req->table = DBT_TABLE_INCIDENTS;
+      if (bind_incidents (fields, nfields, req) < 0)
         return;
     }
   else

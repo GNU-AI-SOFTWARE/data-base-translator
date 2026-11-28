@@ -218,12 +218,26 @@ test_invalid_lines (void)
 static void
 test_invalid_tables (void)
 {
-  parse ("{\"table\": \"incidents\", \"row\": {}}");
+  parse ("{\"table\": \"nope\", \"row\": {}}");
   CHECK (req.kind == DBT_REQ_INVALID);
   CHECK (req.invalid == DBT_INVALID_TABLE);
   /* The reason token is stable; the table name is not the detail:
    * a caller must be able to switch on the reason alone. */
-  CHECK_STR (req.invalid_detail, "");            /* phase 2 */
+  CHECK_STR (req.invalid_detail, "");
+
+  /* incidents is a real table since phase 2 (supervisor): a row
+   * without run_id is refused as a FIELD, not as an unknown table. */
+  parse ("{\"table\": \"incidents\", \"row\": {}}");
+  CHECK (req.kind == DBT_REQ_INVALID);
+  CHECK (req.invalid == DBT_INVALID_FIELD);
+  CHECK_STR (req.invalid_detail, "run_id");
+
+  parse ("{\"table\": \"incidents\", \"row\": {\"run_id\": 4, \"kind\": \"crash\"}}");
+  CHECK (req.kind == DBT_REQ_INSERT);
+  CHECK (req.table == DBT_TABLE_INCIDENTS);
+  CHECK (req.row.incidents.run_id == 4);
+  CHECK (!req.row.incidents.has_instance_id);
+  CHECK_STR (req.row.incidents.kind, "crash");
 
   parse ("{\"table\": \"users\", \"row\": {}}");
   CHECK (req.invalid == DBT_INVALID_TABLE);      /* phase 5 */

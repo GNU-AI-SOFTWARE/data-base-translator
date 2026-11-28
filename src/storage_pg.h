@@ -33,6 +33,9 @@ enum dbt_storage_status pg_insert_run_instances (
 enum dbt_storage_status pg_insert_training_data (
                                const struct dbt_row_training *row,
                                        long long *id);
+enum dbt_storage_status pg_insert_incidents (
+                               const struct dbt_row_incident *row,
+                                       long long *id);
 
 bool pg_connected (void);
 bool pg_schema_ok (void);

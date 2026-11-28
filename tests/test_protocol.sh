@@ -57,7 +57,7 @@ printf '%s' "$OUT" | grep -q '{"invalid": "select"}' \
     || fail "select must be refused until phase 2"
 
 OUT=$(printf '%s\n' \
-    '{"table": "incidents", "row": {"kind": "crash"}}' \
+    '{"table": "nope", "row": {"kind": "crash"}}' \
     | "$BINARY" 2>/dev/null)
 printf '%s' "$OUT" | grep -q '{"invalid": "table"}' \
     || fail "unknown table must answer invalid table"

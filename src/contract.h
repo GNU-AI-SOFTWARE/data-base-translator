@@ -48,6 +48,7 @@ enum dbt_table
     DBT_TABLE_RUNS,
     DBT_TABLE_RUN_INSTANCES,
     DBT_TABLE_TRAINING_DATA,
+    DBT_TABLE_INCIDENTS,
   };
 
 /* --- Machine readable reasons of the "invalid" response -------------- */
@@ -101,6 +102,14 @@ struct dbt_row_training
     const char *checksum;            /* 64 lowercase hex, required */
   };
 
+struct dbt_row_incident
+  {
+    long long   run_id;               /* required, FK runs(id) */
+    bool        has_instance_id;
+    long long   instance_id;          /* optional, FK run_instances(id) */
+    const char *kind;                 /* required: crash|timeout|restart */
+  };
+
 struct dbt_request
   {
     enum dbt_kind   kind;
@@ -114,6 +123,7 @@ struct dbt_request
         struct dbt_row_runs       runs;
         struct dbt_row_instances  instances;
         struct dbt_row_training   training;
+        struct dbt_row_incident   incidents;
       } row;
   };
 

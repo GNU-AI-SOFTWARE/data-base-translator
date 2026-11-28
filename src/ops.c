@@ -149,6 +149,9 @@ ops_process_line (const char *line, size_t len)
     case DBT_TABLE_TRAINING_DATA:
       st = dbt_insert_training_data (&req.row.training, &id);
       break;
+    case DBT_TABLE_INCIDENTS:
+      st = dbt_insert_incidents (&req.row.incidents, &id);
+      break;
     default:
       st = DBT_ST_INVALID;               /* unreachable by the parser */
       break;

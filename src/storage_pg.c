@@ -53,6 +53,7 @@ static struct
 #define STMT_INS_RUNS       "dbt_ins_runs"
 #define STMT_INS_INSTANCES  "dbt_ins_run_instances"
 #define STMT_INS_TRAINING   "dbt_ins_training_data"
+#define STMT_INS_INCIDENTS  "dbt_ins_incidents"
 #define STMT_SEL_CHECKSUM   "dbt_sel_checksum"
 
 /* PostgreSQL type OIDs, so the server never has to infer: the
@@ -106,6 +107,11 @@ prepare_statements (void)
   static const char ins_tr_sql[] =
     "INSERT INTO training_data (source_url, http_status, content,"
     " checksum) VALUES ($1, $2, $3, $4) RETURNING id";
+  static const Oid ins_inc_types[3] =
+    { OID_INT8, OID_INT8, OID_TEXT };
+  static const char ins_inc_sql[] =
+    "INSERT INTO incidents (run_id, instance_id, kind)"
+    " VALUES ($1, $2, $3) RETURNING id";
   static const char sel_sql[] =
     "SELECT id FROM training_data WHERE checksum = $1";
 
@@ -118,10 +124,12 @@ prepare_statements (void)
                       ins_ins_types);
   res[2] = PQprepare (pg.conn, STMT_INS_TRAINING, ins_tr_sql, 4,
                       ins_tr_types);
-  res[3] = PQprepare (pg.conn, STMT_SEL_CHECKSUM, sel_sql, 1,
+  res[3] = PQprepare (pg.conn, STMT_INS_INCIDENTS, ins_inc_sql, 3,
+                      ins_inc_types);
+  res[4] = PQprepare (pg.conn, STMT_SEL_CHECKSUM, sel_sql, 1,
                       sel_types);
 
-  for (int i = 0; i < 4; i++)
+  for (int i = 0; i < 5; i++)
     {
       if (res[i] == NULL || PQresultStatus (res[i]) != PGRES_COMMAND_OK)
         ok = false;
@@ -411,6 +419,28 @@ pg_insert_training_data (const struct dbt_row_training *row,
         return DBT_ST_TRANSPORT;
     }
   return st;
+}
+
+enum dbt_storage_status
+pg_insert_incidents (const struct dbt_row_incident *row, long long *id)
+{
+  char run_id_buf[32];
+  char inst_id_buf[32];
+  const char *values[3];
+  const int lengths[3] = { 0, 0, 0 };
+
+  snprintf (run_id_buf, sizeof run_id_buf, "%lld", row->run_id);
+  values[0] = run_id_buf;
+  values[1] = NULL;
+  if (row->has_instance_id)
+    {
+      snprintf (inst_id_buf, sizeof inst_id_buf, "%lld",
+                row->instance_id);
+      values[1] = inst_id_buf;
+    }
+  values[2] = row->kind;
+
+  return exec_prepared_id (STMT_INS_INCIDENTS, values, lengths, 3, id);
 }
 
 bool
