@@ -790,6 +790,114 @@ bind_aggregator (const struct field *fields, int nfields,
   return 0;
 }
 
+/* feedback (phase B4): one user rating on an answer. */
+static int
+bind_feedback (const struct field *fields, int nfields,
+               struct dbt_request *req)
+{
+  const struct field *p = find (fields, nfields, "prompt");
+  const struct field *r = find (fields, nfields, "response");
+  const struct field *g = find (fields, nfields, "rating");
+  const struct field *u = find (fields, nfields, "source_url");
+  struct dbt_row_feedback *row = &req->row.feedback;
+
+  if (p == NULL || p->type != F_STR)
+    {
+      req->invalid = p == NULL ? DBT_INVALID_FIELD : DBT_INVALID_TYPE;
+      strcpy (req->invalid_detail, "prompt");
+      return -1;
+    }
+  row->prompt = p->str;
+  if (r == NULL || r->type != F_STR)
+    {
+      req->invalid = r == NULL ? DBT_INVALID_FIELD : DBT_INVALID_TYPE;
+      strcpy (req->invalid_detail, "response");
+      return -1;
+    }
+  row->response = r->str;
+  if (g == NULL || g->type != F_STR)
+    {
+      req->invalid = g == NULL ? DBT_INVALID_FIELD : DBT_INVALID_TYPE;
+      strcpy (req->invalid_detail, "rating");
+      return -1;
+    }
+  if (strcmp (g->str, "good") != 0 && strcmp (g->str, "bad") != 0)
+    {
+      req->invalid = DBT_INVALID_VALUE;
+      strcpy (req->invalid_detail, "rating");
+      return -1;
+    }
+  row->rating = g->str;
+  row->source_url = (u != NULL && u->type == F_STR) ? u->str : NULL;
+
+  for (int i = 0; i < nfields; i++)
+    {
+      const char *k = fields[i].key;
+
+      if (strcmp (k, "prompt") != 0 && strcmp (k, "response") != 0
+          && strcmp (k, "rating") != 0 && strcmp (k, "source_url") != 0)
+        {
+          req->invalid = DBT_INVALID_KEY;
+          set_detail (req, k);
+          return -1;
+        }
+    }
+  return 0;
+}
+
+/* models (phase B4): one versioned serialized .nn model. */
+static int
+bind_model (const struct field *fields, int nfields,
+            struct dbt_request *req)
+{
+  const struct field *n = find (fields, nfields, "name");
+  const struct field *v = find (fields, nfields, "version");
+  const struct field *p = find (fields, nfields, "payload");
+  struct dbt_row_model *r = &req->row.model;
+
+  if (n == NULL || n->type != F_STR)
+    {
+      req->invalid = n == NULL ? DBT_INVALID_FIELD : DBT_INVALID_TYPE;
+      strcpy (req->invalid_detail, "name");
+      return -1;
+    }
+  r->name = n->str;
+  if (v == NULL || v->type != F_NUM)
+    {
+      req->invalid = v == NULL ? DBT_INVALID_FIELD : DBT_INVALID_TYPE;
+      strcpy (req->invalid_detail, "version");
+      return -1;
+    }
+  r->version = strtol (v->num, NULL, 10);
+  if (r->version < 1)
+    {
+      req->invalid = DBT_INVALID_VALUE;
+      strcpy (req->invalid_detail, "version");
+      return -1;
+    }
+  if (p == NULL || p->type != F_STR)
+    {
+      req->invalid = p == NULL ? DBT_INVALID_FIELD : DBT_INVALID_TYPE;
+      strcpy (req->invalid_detail, "payload");
+      return -1;
+    }
+  r->payload = p->str;
+
+  for (int i = 0; i < nfields; i++)
+    {
+      const char *k = fields[i].key;
+
+      if (strcmp (k, "name") != 0 && strcmp (k, "version") != 0
+          && strcmp (k, "payload") != 0)
+        {
+          req->invalid = DBT_INVALID_KEY;
+          set_detail (req, k);
+          return -1;
+        }
+    }
+  return 0;
+}
+
 static int
 bind_runs (const struct field *fields, int nfields,
            struct dbt_request *req)
@@ -1355,6 +1463,10 @@ dbt_parse (const char *line, size_t len,
         { "id", "source_url", NULL };
       static const char *const cols_agg[] =
         { "id", "topology", NULL };
+      static const char *const cols_feedback[] =
+        { "id", "rating", "source_url", NULL };
+      static const char *const cols_models[] =
+        { "id", "name", "version", NULL };
       const char *const *cols = NULL;
 
       if (have_row)
@@ -1392,6 +1504,16 @@ dbt_parse (const char *line, size_t len,
         {
           req->table = DBT_TABLE_AGGREGATOR_STATE;
           cols = cols_agg;
+        }
+      else if (strcmp (table_name, "feedback") == 0)
+        {
+          req->table = DBT_TABLE_FEEDBACK;
+          cols = cols_feedback;
+        }
+      else if (strcmp (table_name, "models") == 0)
+        {
+          req->table = DBT_TABLE_MODELS;
+          cols = cols_models;
         }
       else
         {
@@ -1465,6 +1587,18 @@ dbt_parse (const char *line, size_t len,
     {
       req->table = DBT_TABLE_AGGREGATOR_STATE;
       if (bind_aggregator (fields, nfields, req) < 0)
+        return;
+    }
+  else if (strcmp (table_name, "feedback") == 0)
+    {
+      req->table = DBT_TABLE_FEEDBACK;
+      if (bind_feedback (fields, nfields, req) < 0)
+        return;
+    }
+  else if (strcmp (table_name, "models") == 0)
+    {
+      req->table = DBT_TABLE_MODELS;
+      if (bind_model (fields, nfields, req) < 0)
         return;
     }
   else

@@ -129,6 +129,28 @@ dbt_schema_ddl (void)
     "    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()\n"
     ");\n"
     "\n"
+    "-- User feedback on answers (phase B4): /good /bad rate the last\n"
+    "-- reply; /entrainement --from-feedback re-ingests the \"good\" ones.\n"
+    "CREATE TABLE IF NOT EXISTS feedback (\n"
+    "    id          BIGSERIAL PRIMARY KEY,\n"
+    "    prompt      TEXT NOT NULL,                -- the question asked\n"
+    "    response    TEXT NOT NULL,                -- the answer that was given\n"
+    "    rating      TEXT NOT NULL,                -- good | bad\n"
+    "    source_url  TEXT,                         -- training source of the reply\n"
+    "    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()\n"
+    ");\n"
+    "\n"
+    "-- Versioned neuron models (phase B4): the serialized .nn payload,\n"
+    "-- one row per (name, version); the highest version is current.\n"
+    "CREATE TABLE IF NOT EXISTS models (\n"
+    "    id          BIGSERIAL PRIMARY KEY,\n"
+    "    name        TEXT NOT NULL,                -- e.g. \"sigmoid-default\"\n"
+    "    version     INT NOT NULL,                 -- monotonic per name\n"
+    "    payload     TEXT NOT NULL,                -- .nn model, hex-encoded (binary)\n"
+    "    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),\n"
+    "    UNIQUE (name, version)\n"
+    ");\n"
+    "\n"
     "-- Users allowed in the remote mode (inference-translator)\n"
     "CREATE TABLE IF NOT EXISTS users (\n"
     "    id          BIGSERIAL PRIMARY KEY,\n"
@@ -155,8 +177,7 @@ dbt_schema_ddl (void)
     "    fingerprint CHAR(64),                     -- NULL if invalid key\n"
     "    origin      TEXT,                         -- origin address\n"
     "    refused_at  TIMESTAMPTZ NOT NULL DEFAULT now()\n"
-    ");\n"
-;
+    ");\n";
 }
 
 /* ---------------------------------------------------------------------
@@ -330,6 +351,40 @@ dbt_insert_ingest_jobs (const struct dbt_row_ingest *row, long long *id)
   if (st == DBT_ST_OK)
     dbt_state.counters.ingest_jobs++;
   else if (st == DBT_ST_INVALID)
+    dbt_state.counters.invalid++;
+  return st;
+}
+
+enum dbt_storage_status
+dbt_insert_feedback (const struct dbt_row_feedback *row, long long *id)
+{
+  enum dbt_storage_status st;
+
+#ifdef HAVE_LIBPQ
+  st = pg_insert_feedback (row, id);
+#else
+  (void) row;
+  (void) id;
+  st = unavailable ();
+#endif
+  if (st == DBT_ST_INVALID)
+    dbt_state.counters.invalid++;
+  return st;
+}
+
+enum dbt_storage_status
+dbt_insert_model (const struct dbt_row_model *row, long long *id)
+{
+  enum dbt_storage_status st;
+
+#ifdef HAVE_LIBPQ
+  st = pg_insert_model (row, id);
+#else
+  (void) row;
+  (void) id;
+  st = unavailable ();
+#endif
+  if (st == DBT_ST_INVALID)
     dbt_state.counters.invalid++;
   return st;
 }

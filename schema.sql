@@ -72,6 +72,28 @@ CREATE TABLE IF NOT EXISTS aggregator_state (
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- User feedback on answers (phase B4): /good /bad rate the last
+-- reply; /entrainement --from-feedback re-ingests the "good" ones.
+CREATE TABLE IF NOT EXISTS feedback (
+    id          BIGSERIAL PRIMARY KEY,
+    prompt      TEXT NOT NULL,                -- the question asked
+    response    TEXT NOT NULL,                -- the answer that was given
+    rating      TEXT NOT NULL,                -- good | bad
+    source_url  TEXT,                         -- training source of the reply
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Versioned neuron models (phase B4): the serialized .nn payload,
+-- one row per (name, version); the highest version is current.
+CREATE TABLE IF NOT EXISTS models (
+    id          BIGSERIAL PRIMARY KEY,
+    name        TEXT NOT NULL,                -- e.g. "sigmoid-default"
+    version     INT NOT NULL,                 -- monotonic per name
+    payload     TEXT NOT NULL,                -- .nn model, hex-encoded (binary)
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (name, version)
+);
+
 -- Users allowed in the remote mode (inference-translator)
 CREATE TABLE IF NOT EXISTS users (
     id          BIGSERIAL PRIMARY KEY,

@@ -63,6 +63,12 @@ enum dbt_storage_status dbt_insert_aggregator_state (
 enum dbt_storage_status dbt_insert_ingest_jobs (
                                const struct dbt_row_ingest *row,
                                          long long *id);
+enum dbt_storage_status dbt_insert_feedback (
+                               const struct dbt_row_feedback *row,
+                                         long long *id);
+enum dbt_storage_status dbt_insert_model (
+                               const struct dbt_row_model *row,
+                                         long long *id);
 enum dbt_storage_status dbt_insert_training_data (
                                 const struct dbt_row_training *row,
                                 long long *id);

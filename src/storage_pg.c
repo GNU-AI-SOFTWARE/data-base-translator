@@ -56,6 +56,8 @@ static struct
 #define STMT_INS_INCIDENTS  "dbt_ins_incidents"
 #define STMT_INS_INGEST     "dbt_ins_ingest_jobs"
 #define STMT_INS_AGG        "dbt_ins_aggregator_state"
+#define STMT_INS_FEEDBACK   "dbt_ins_feedback"
+#define STMT_INS_MODEL      "dbt_ins_models"
 #define STMT_SEL_CHECKSUM   "dbt_sel_checksum"
 
 /* PostgreSQL type OIDs, so the server never has to infer: the
@@ -122,10 +124,19 @@ prepare_statements (void)
   static const char ins_agg_sql[] =
     "INSERT INTO aggregator_state (topology, weight, version)"
     " VALUES ($1, $2, $3) RETURNING id";
+  static const Oid ins_fb_types[4] =
+    { OID_TEXT, OID_TEXT, OID_TEXT, OID_TEXT };
+  static const char ins_fb_sql[] =
+    "INSERT INTO feedback (prompt, response, rating, source_url)"
+    " VALUES ($1, $2, $3, $4) RETURNING id";
+  static const Oid ins_model_types[3] = { OID_TEXT, OID_INT4, OID_TEXT };
+  static const char ins_model_sql[] =
+    "INSERT INTO models (name, version, payload)"
+    " VALUES ($1, $2, $3) RETURNING id";
   static const char sel_sql[] =
     "SELECT id FROM training_data WHERE checksum = $1";
 
-  PGresult *res[7];
+  PGresult *res[9];
   bool ok = true;
 
   res[0] = PQprepare (pg.conn, STMT_INS_RUNS, ins_runs_sql, 3,
@@ -142,8 +153,12 @@ prepare_statements (void)
                       ins_ing_types);
   res[6] = PQprepare (pg.conn, STMT_INS_AGG, ins_agg_sql, 3,
                       ins_agg_types);
+  res[7] = PQprepare (pg.conn, STMT_INS_FEEDBACK, ins_fb_sql, 4,
+                      ins_fb_types);
+  res[8] = PQprepare (pg.conn, STMT_INS_MODEL, ins_model_sql, 3,
+                      ins_model_types);
 
-  for (int i = 0; i < 7; i++)
+  for (int i = 0; i < 9; i++)
     {
       if (res[i] == NULL || PQresultStatus (res[i]) != PGRES_COMMAND_OK)
         ok = false;
@@ -506,6 +521,17 @@ static const struct sel_col sel_agg[] =
     { "id", SEL_NUM }, { "topology", SEL_TEXT }, { "weight", SEL_NUM },
     { "version", SEL_NUM }, { "updated_at", SEL_TEXT }, { NULL, 0 }
   };
+static const struct sel_col sel_feedback[] =
+  {
+    { "id", SEL_NUM }, { "prompt", SEL_TEXT }, { "response", SEL_TEXT },
+    { "rating", SEL_TEXT }, { "source_url", SEL_TEXT },
+    { "created_at", SEL_TEXT }, { NULL, 0 }
+  };
+static const struct sel_col sel_models[] =
+  {
+    { "id", SEL_NUM }, { "name", SEL_TEXT }, { "version", SEL_NUM },
+    { "payload", SEL_TEXT }, { "created_at", SEL_TEXT }, { NULL, 0 }
+  };
 
 /* Append S to OUT as a JSON string (with quotes, escaped). */
 static size_t
@@ -557,7 +583,7 @@ pg_select (enum dbt_table table, const char *where_col,
 {
   static const char *const tbl_name[] =
     { "", "runs", "run_instances", "training_data", "incidents",
-      "ingest_jobs", "aggregator_state" };
+      "ingest_jobs", "aggregator_state", "feedback", "models" };
   const struct sel_col *cols;
   char sql[512];
   char limit_buf[24];
@@ -568,7 +594,7 @@ pg_select (enum dbt_table table, const char *where_col,
   size_t len = 0;
   long n;
 
-  if (table <= DBT_TABLE_NONE || table > DBT_TABLE_AGGREGATOR_STATE)
+  if (table <= DBT_TABLE_NONE || table > DBT_TABLE_MODELS)
     return DBT_ST_INVALID;
 
   switch (table)
@@ -578,6 +604,8 @@ pg_select (enum dbt_table table, const char *where_col,
     case DBT_TABLE_INCIDENTS:     cols = sel_incidents; break;
     case DBT_TABLE_INGEST_JOBS:   cols = sel_ingest; break;
     case DBT_TABLE_AGGREGATOR_STATE: cols = sel_agg; break;
+    case DBT_TABLE_FEEDBACK:      cols = sel_feedback; break;
+    case DBT_TABLE_MODELS:        cols = sel_models; break;
     default:                      cols = sel_training; break;
     }
 
@@ -716,6 +744,33 @@ pg_insert_aggregator (const struct dbt_row_aggregator *row,
   values[1] = wbuf;
   values[2] = vbuf;
   return exec_prepared_id (STMT_INS_AGG, values, lengths, 3, id);
+}
+
+enum dbt_storage_status
+pg_insert_feedback (const struct dbt_row_feedback *row, long long *id)
+{
+  const char *values[4];
+  const int lengths[4] = { 0, 0, 0, 0 };
+
+  values[0] = row->prompt;
+  values[1] = row->response;
+  values[2] = row->rating;
+  values[3] = row->source_url;   /* NULL renders as SQL NULL */
+  return exec_prepared_id (STMT_INS_FEEDBACK, values, lengths, 4, id);
+}
+
+enum dbt_storage_status
+pg_insert_model (const struct dbt_row_model *row, long long *id)
+{
+  char vbuf[24];
+  const char *values[3];
+  const int lengths[3] = { 0, 0, 0 };
+
+  snprintf (vbuf, sizeof vbuf, "%ld", row->version);
+  values[0] = row->name;
+  values[1] = vbuf;
+  values[2] = row->payload;
+  return exec_prepared_id (STMT_INS_MODEL, values, lengths, 3, id);
 }
 
 bool

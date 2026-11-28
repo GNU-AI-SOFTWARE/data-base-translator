@@ -193,6 +193,12 @@ ops_process_line (const char *line, size_t len)
     case DBT_TABLE_AGGREGATOR_STATE:
       st = dbt_insert_aggregator_state (&req.row.aggregator, &id);
       break;
+    case DBT_TABLE_FEEDBACK:
+      st = dbt_insert_feedback (&req.row.feedback, &id);
+      break;
+    case DBT_TABLE_MODELS:
+      st = dbt_insert_model (&req.row.model, &id);
+      break;
     default:
       st = DBT_ST_INVALID;               /* unreachable by the parser */
       break;

@@ -52,6 +52,8 @@ enum dbt_table
     DBT_TABLE_INCIDENTS,
     DBT_TABLE_INGEST_JOBS,   /* phase B3: /entrainement --from journal */
     DBT_TABLE_AGGREGATOR_STATE, /* phase A4: learned weights */
+    DBT_TABLE_FEEDBACK,      /* phase B4: /good /bad on answers */
+    DBT_TABLE_MODELS,        /* phase B4: versioned .nn models */
   };
 
 /* --- Machine readable reasons of the "invalid" response -------------- */
@@ -128,6 +130,21 @@ struct dbt_row_aggregator
     long        version;              /* required, >= 1 */
   };
 
+struct dbt_row_feedback
+  {
+    const char *prompt;               /* required */
+    const char *response;             /* required */
+    const char *rating;               /* required: good | bad */
+    const char *source_url;           /* optional */
+  };
+
+struct dbt_row_model
+  {
+    const char *name;                 /* required */
+    long        version;              /* required, >= 1 */
+    const char *payload;              /* required: serialized .nn */
+  };
+
 struct dbt_request
   {
     enum dbt_kind   kind;
@@ -144,6 +161,8 @@ struct dbt_request
         struct dbt_row_incident   incidents;
         struct dbt_row_ingest     ingest;
         struct dbt_row_aggregator aggregator;
+        struct dbt_row_feedback   feedback;
+        struct dbt_row_model      model;
       } row;
     /* When kind is DBT_REQ_SELECT: an optional single-column equality
      * filter.  Both strings reference the parse arena; the column is

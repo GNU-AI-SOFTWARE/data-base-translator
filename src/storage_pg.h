@@ -42,6 +42,12 @@ enum dbt_storage_status pg_insert_aggregator (
 enum dbt_storage_status pg_insert_ingest (
                                const struct dbt_row_ingest *row,
                                        long long *id);
+enum dbt_storage_status pg_insert_feedback (
+                               const struct dbt_row_feedback *row,
+                                         long long *id);
+enum dbt_storage_status pg_insert_model (
+                               const struct dbt_row_model *row,
+                                         long long *id);
 enum dbt_storage_status pg_select (enum dbt_table table,
                                    const char *where_col,
                                    const char *where_val,
