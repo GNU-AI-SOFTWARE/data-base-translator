@@ -31,7 +31,7 @@
 /* Scratch arena: decoded strings and raw JSON spans never exceed the
  * line itself plus one NUL per span, with a wide margin. */
 #define DBT_SCRATCH      (DBT_MAX_LINE + 4096u)
-#define DBT_MAX_RESPONSE 256                /* responses are tiny */
+#define DBT_MAX_RESPONSE (256u * 1024u)      /* select rows ride here */
 
 /* --- Instruction kinds ---------------------------------------------- */
 enum dbt_kind
@@ -39,6 +39,7 @@ enum dbt_kind
     DBT_REQ_INVALID = 0,   /* contract violated; see req->invalid */
     DBT_REQ_INSERT,        /* {"table": ..., "row": {...}} */
     DBT_REQ_STATUS,        /* {"status": true} */
+    DBT_REQ_SELECT,        /* {"select": ..., "where": {...}, "limit": n} */
   };
 
 /* --- Tables addressable in phase 1 ---------------------------------- */
@@ -61,7 +62,7 @@ enum dbt_invalid
     DBT_INVALID_TYPE,      /* field present with the wrong JSON type */
     DBT_INVALID_KEY,       /* unknown key, at top level or in the row */
     DBT_INVALID_CHECKSUM,  /* not 64 lowercase hexadecimal characters */
-    DBT_INVALID_SELECT,    /* "select" arrives with phase 2 */
+    DBT_INVALID_SELECT,    /* retired: select is served since A3 */
     DBT_INVALID_TOOLONG,   /* instruction line exceeds DBT_MAX_LINE */
   };
 
@@ -125,6 +126,14 @@ struct dbt_request
         struct dbt_row_training   training;
         struct dbt_row_incident   incidents;
       } row;
+    /* When kind is DBT_REQ_SELECT: an optional single-column equality
+     * filter.  Both strings reference the parse arena; the column is
+     * always one of the whitelisted names of the table. */
+    const char      *sel_where_col;
+    const char      *sel_where_val;
+    bool             sel_where_is_num;
+    bool             sel_has_limit;
+    long             sel_limit;
   };
 
 /* Parse one complete instruction line (without its newline).
@@ -147,6 +156,10 @@ size_t dbt_response_invalid (char *buf, size_t cap,
                              enum dbt_invalid reason,
                              const char *detail); /* NULL: generic */
 size_t dbt_response_empty (char *buf, size_t cap);
+/* {"count": N, "rows": [ ... ]} — ROWS_JSON is a pre-rendered array
+ * body (possibly empty) built by the storage layer. */
+size_t dbt_response_select (char *buf, size_t cap,
+                            const char *rows_json, long count);
 
 /* Append one field `"key": number` to a JSON object being built at
  * BUF (used by the status line in ops.c); returns the new length. */

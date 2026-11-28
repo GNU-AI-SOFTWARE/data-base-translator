@@ -52,9 +52,13 @@ OUT=$(printf '%s\n' \
 printf '%s' "$OUT" | grep -q '{"invalid": "checksum"}' \
     || fail "bad checksum must answer invalid checksum"
 
-OUT=$(printf '%s\n' '{"select": "runs", "where": {}}' | "$BINARY" 2>/dev/null)
-printf '%s' "$OUT" | grep -q '{"invalid": "select"}' \
-    || fail "select must be refused until phase 2"
+OUT=$(printf '%s\n' '{"select": "nope"}' | "$BINARY" 2>/dev/null)
+printf '%s' "$OUT" | grep -q '{"invalid": "table"}' \
+    || fail "select of an unknown table must answer invalid table"
+
+OUT=$(printf '%s\n' '{"select": "runs", "where": {"descriptor": 1}}' | "$BINARY" 2>/dev/null)
+printf '%s' "$OUT" | grep -q '{"invalid": "descriptor"}' \
+    || fail "select where on a non-whitelisted column must name the column"
 
 OUT=$(printf '%s\n' \
     '{"table": "nope", "row": {"kind": "crash"}}' \

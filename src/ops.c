@@ -25,10 +25,12 @@
 #include "contract.h"
 #include "storage.h"
 
-/* The response slot and the parse arena, allocated once. */
+/* The response slot and the parse arena, allocated once.  A select
+ * renders its rows into ops_rows first, then the slot wraps them. */
 static char  ops_slot[DBT_MAX_RESPONSE];
 static size_t ops_slot_len;
 static char  ops_scratch[DBT_SCRATCH];
+static char  ops_rows[DBT_MAX_LINE];
 
 /* Build the status line into the slot: the state of the base is
  * data, always readable, even when the server is down. */
@@ -133,6 +135,35 @@ ops_process_line (const char *line, size_t len)
                                            req.invalid,
                                            req.invalid_detail));
       return 0;
+
+    case DBT_REQ_SELECT:
+      {
+        long count = 0;
+        enum dbt_storage_status st =
+          dbt_select (req.table, req.sel_where_col, req.sel_where_val,
+                      req.sel_where_is_num, req.sel_limit,
+                      ops_rows, sizeof ops_rows, &count);
+
+        if (st == DBT_ST_OK || st == DBT_ST_EMPTY)
+          set_response (dbt_response_select (
+                          ops_slot, sizeof ops_slot,
+                          st == DBT_ST_EMPTY ? "" : ops_rows, count));
+        else if (st == DBT_ST_INVALID)
+          {
+            dbt_storage_note_invalid ();
+            set_response (dbt_response_invalid (
+                            ops_slot, sizeof ops_slot,
+                            DBT_INVALID_FIELD,
+                            req.sel_where_col != NULL
+                              ? req.sel_where_col : "row"));
+          }
+        else
+          {
+            errno = EIO;
+            return -1;
+          }
+        return 0;
+      }
 
     case DBT_REQ_INSERT:
       break;

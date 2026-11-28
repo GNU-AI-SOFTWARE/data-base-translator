@@ -977,6 +977,7 @@ dbt_parse (const char *line, size_t len,
   const char *table_name = NULL;
   bool have_row = false;
   bool have_status = false;
+  bool have_select = false;
 
   memset (req, 0, sizeof *req);
   req->kind = DBT_REQ_INVALID;
@@ -1070,12 +1071,119 @@ dbt_parse (const char *line, size_t len,
         }
       else if (strncmp (key, "select", 7) == 0)
         {
-          /* Recognized on purpose: the read half of the contract
-           * arrives with phase 2, and a caller using it early gets
-           * a precise answer, not a generic one. */
-          req->invalid = DBT_INVALID_SELECT;
-          strcpy (req->invalid_detail, "select");
-          return;
+          size_t l = 0;
+
+          table_name = parse_string (&sc, &l);
+          if (table_name == NULL)
+            {
+              req->invalid = DBT_INVALID_JSON;
+              return;
+            }
+          have_select = true;
+        }
+      else if (strncmp (key, "where", 6) == 0)
+        {
+          /* One single-column equality filter: {"where": {"col":
+           * value}}.  The column is whitelisted per table below. */
+          const char *col;
+          size_t cl = 0;
+          size_t v0, v1;
+
+          skip_ws (&sc);
+          if (next (&sc) != '{')
+            {
+              req->invalid = DBT_INVALID_JSON;
+              return;
+            }
+          skip_ws (&sc);
+          col = parse_string (&sc, &cl);
+          if (col == NULL)
+            {
+              req->invalid = DBT_INVALID_JSON;
+              return;
+            }
+          skip_ws (&sc);
+          if (next (&sc) != ':')
+            {
+              req->invalid = DBT_INVALID_JSON;
+              return;
+            }
+          skip_ws (&sc);
+          if (peek (&sc) == '"')
+            {
+              /* decoded string content, without the quotes */
+              size_t vl = 0;
+              const char *dec = parse_string (&sc, &vl);
+
+              if (dec == NULL)
+                {
+                  req->invalid = DBT_INVALID_JSON;
+                  return;
+                }
+              req->sel_where_val = dec;
+              req->sel_where_is_num = false;
+            }
+          else
+            {
+              if (skip_value (&sc, &v0, &v1) < 0)
+                {
+                  req->invalid = DBT_INVALID_JSON;
+                  return;
+                }
+              req->sel_where_val = copy_raw (&sc, v0, v1);
+              if (req->sel_where_val == NULL)
+                {
+                  req->invalid = DBT_INVALID_TOOLONG;
+                  return;
+                }
+              req->sel_where_is_num = true;
+            }
+          skip_ws (&sc);
+          if (next (&sc) != '}')
+            {
+              req->invalid = DBT_INVALID_JSON;
+              return;
+            }
+          if (cl > DBT_MAX_KEY)
+            {
+              req->invalid = DBT_INVALID_KEY;
+              memcpy (req->invalid_detail, col, DBT_MAX_KEY);
+              req->invalid_detail[DBT_MAX_KEY] = '\0';
+              return;
+            }
+          req->sel_where_col = copy_raw (&sc, (size_t) (col - sc.s),
+                                         (size_t) (col - sc.s) + cl);
+          if (req->sel_where_col == NULL)
+            {
+              req->invalid = DBT_INVALID_TOOLONG;
+              return;
+            }
+        }
+      else if (strncmp (key, "limit", 6) == 0)
+        {
+          size_t v0, v1;
+
+          if (skip_value (&sc, &v0, &v1) < 0)
+            {
+              req->invalid = DBT_INVALID_JSON;
+              return;
+            }
+          {
+            char numbuf[24];
+
+            if (v1 - v0 >= sizeof numbuf)
+              {
+                req->invalid = DBT_INVALID_TYPE;
+                strcpy (req->invalid_detail, "limit");
+                return;
+              }
+            memcpy (numbuf, sc.s + v0, v1 - v0);
+            numbuf[v1 - v0] = '\0';
+            req->sel_limit = atol (numbuf);
+            if (req->sel_limit < 0)
+              req->sel_limit = 0;
+            req->sel_has_limit = true;
+          }
         }
       else
         {
@@ -1114,6 +1222,75 @@ dbt_parse (const char *line, size_t len,
           return;
         }
       req->kind = DBT_REQ_STATUS;
+      return;
+    }
+
+  if (have_select)
+    {
+      /* The read half of the contract (phase A3): one table, one
+       * optional single-column equality, one row cap.  Identifiers
+       * never reach SQL: the column is checked against the frozen
+       * whitelist of the table here, in the parser. */
+      static const char *const cols_runs[] = { "id", NULL };
+      static const char *const cols_inst[] =
+        { "id", "run_id", "status", NULL };
+      static const char *const cols_inc[] = { "id", "run_id", NULL };
+      static const char *const cols_tr[] =
+        { "id", "checksum", NULL };
+      const char *const *cols = NULL;
+
+      if (have_row)
+        {
+          req->invalid = DBT_INVALID_KEY;
+          strcpy (req->invalid_detail, "row");
+          return;
+        }
+      if (strcmp (table_name, "runs") == 0)
+        {
+          req->table = DBT_TABLE_RUNS;
+          cols = cols_runs;
+        }
+      else if (strcmp (table_name, "run_instances") == 0)
+        {
+          req->table = DBT_TABLE_RUN_INSTANCES;
+          cols = cols_inst;
+        }
+      else if (strcmp (table_name, "incidents") == 0)
+        {
+          req->table = DBT_TABLE_INCIDENTS;
+          cols = cols_inc;
+        }
+      else if (strcmp (table_name, "training_data") == 0)
+        {
+          req->table = DBT_TABLE_TRAINING_DATA;
+          cols = cols_tr;
+        }
+      else
+        {
+          req->invalid = DBT_INVALID_TABLE;
+          return;
+        }
+      if (req->sel_where_col != NULL)
+        {
+          bool ok = false;
+
+          for (int i = 0; cols[i] != NULL; i++)
+            if (strcmp (req->sel_where_col, cols[i]) == 0)
+              ok = true;
+          if (!ok)
+            {
+              req->invalid = DBT_INVALID_FIELD;
+              strncpy (req->invalid_detail, req->sel_where_col,
+                       DBT_MAX_KEY);
+              req->invalid_detail[DBT_MAX_KEY] = '\0';
+              return;
+            }
+        }
+      if (!req->sel_has_limit)
+        req->sel_limit = 1024;      /* default row cap of a select */
+      if (req->sel_limit > 4096)
+        req->sel_limit = 4096;
+      req->kind = DBT_REQ_SELECT;
       return;
     }
 
@@ -1194,6 +1371,16 @@ size_t
 dbt_response_empty (char *buf, size_t cap)
 {
   int n = snprintf (buf, cap, "{\"empty\": true}");
+
+  return n < 0 || (size_t) n >= cap ? 0 : (size_t) n;
+}
+
+size_t
+dbt_response_select (char *buf, size_t cap,
+                     const char *rows_json, long count)
+{
+  int n = snprintf (buf, cap, "{\"count\": %ld, \"rows\": [%s]}",
+                    count, rows_json != NULL ? rows_json : "");
 
   return n < 0 || (size_t) n >= cap ? 0 : (size_t) n;
 }

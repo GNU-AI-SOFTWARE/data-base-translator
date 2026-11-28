@@ -59,6 +59,18 @@ enum dbt_storage_status dbt_insert_training_data (
                                 const struct dbt_row_training *row,
                                 long long *id);
 
+/* Read half (phase A3): one whitelisted table, one optional
+ * single-column equality filter, one row cap.  The rows are rendered
+ * as a JSON array BODY (no surrounding brackets) into OUT; *COUNT
+ * receives the row count.  Returns DBT_ST_EMPTY when no row matches. */
+enum dbt_storage_status dbt_select (enum dbt_table table,
+                                    const char *where_col,
+                                    const char *where_val,
+                                    bool where_is_num,
+                                    long limit,
+                                    char *out, size_t cap,
+                                    long *count);
+
 /* Status report of the /db/status kind. */
 bool dbt_storage_connected (void);
 int  dbt_storage_server_version (void);    /* 0: unknown */

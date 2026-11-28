@@ -36,6 +36,11 @@ enum dbt_storage_status pg_insert_training_data (
 enum dbt_storage_status pg_insert_incidents (
                                const struct dbt_row_incident *row,
                                        long long *id);
+enum dbt_storage_status pg_select (enum dbt_table table,
+                                   const char *where_col,
+                                   const char *where_val,
+                                   bool where_is_num, long limit,
+                                   char *out, size_t cap, long *count);
 
 bool pg_connected (void);
 bool pg_schema_ok (void);

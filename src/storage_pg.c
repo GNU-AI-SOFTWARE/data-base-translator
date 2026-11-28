@@ -443,6 +443,224 @@ pg_insert_incidents (const struct dbt_row_incident *row, long long *id)
   return exec_prepared_id (STMT_INS_INCIDENTS, values, lengths, 3, id);
 }
 
+/* ---------------------------------------------------------------------
+ *  Read half (phase A3): dbt_select.
+ *
+ *  The SELECT list and the WHERE column come from frozen whitelists
+ *  (the parser already checked the where column); only the values
+ *  are parameters.  Rows are rendered as a JSON array body.
+ * ------------------------------------------------------------------- */
+
+/* Column kinds: NUM renders raw, TEXT is escaped, JSONB renders raw
+ * (the server returns valid JSON), NULL stays null. */
+enum sel_kind { SEL_NUM = 0, SEL_TEXT, SEL_JSONB };
+
+struct sel_col
+  {
+    const char *name;
+    enum sel_kind kind;
+  };
+
+static const struct sel_col sel_runs[] =
+  {
+    { "id", SEL_NUM }, { "started_at", SEL_TEXT },
+    { "descriptor", SEL_JSONB }, { "aggregate_strategy", SEL_TEXT },
+    { "final_output", SEL_JSONB }, { NULL, 0 }
+  };
+static const struct sel_col sel_instances[] =
+  {
+    { "id", SEL_NUM }, { "run_id", SEL_NUM }, { "topology", SEL_TEXT },
+    { "seed", SEL_NUM }, { "input", SEL_JSONB }, { "output", SEL_JSONB },
+    { "score", SEL_NUM }, { "status", SEL_TEXT }, { NULL, 0 }
+  };
+static const struct sel_col sel_incidents[] =
+  {
+    { "id", SEL_NUM }, { "run_id", SEL_NUM }, { "instance_id", SEL_NUM },
+    { "kind", SEL_TEXT }, { "detected_at", SEL_TEXT }, { NULL, 0 }
+  };
+static const struct sel_col sel_training[] =
+  {
+    { "id", SEL_NUM }, { "source_url", SEL_TEXT },
+    { "http_status", SEL_NUM }, { "checksum", SEL_TEXT }, { NULL, 0 }
+  };
+
+/* Append S to OUT as a JSON string (with quotes, escaped). */
+static size_t
+append_json_string (char *out, size_t cap, size_t len, const char *s)
+{
+  size_t room = cap > len ? cap - len : 0;
+
+  if (room < 2)
+    return len;
+  out[len++] = '"';
+  room--;
+  for (const unsigned char *p = (const unsigned char *) s;
+       *p != '\0' && room > 6; p++)
+    {
+      char tmp[8];
+      int n;
+
+      switch (*p)
+        {
+        case '"':  n = snprintf (tmp, sizeof tmp, "\\\""); break;
+        case '\\': n = snprintf (tmp, sizeof tmp, "\\\\"); break;
+        case '\n': n = snprintf (tmp, sizeof tmp, "\\n"); break;
+        case '\r': n = snprintf (tmp, sizeof tmp, "\\r"); break;
+        case '\t': n = snprintf (tmp, sizeof tmp, "\\t"); break;
+        default:
+          if (*p < 0x20)
+            n = snprintf (tmp, sizeof tmp, "\\u%04x", *p);
+          else
+            {
+              tmp[0] = (char) *p;
+              n = 1;
+            }
+          break;
+        }
+      memcpy (out + len, tmp, (size_t) n);
+      len += (size_t) n;
+      room -= (size_t) n;
+    }
+  if (room < 1)
+    return len;
+  out[len++] = '"';
+  return len;
+}
+
+enum dbt_storage_status
+pg_select (enum dbt_table table, const char *where_col,
+           const char *where_val, bool where_is_num, long limit,
+           char *out, size_t cap, long *count)
+{
+  static const char *const tbl_name[] =
+    { "", "runs", "run_instances", "training_data", "incidents" };
+  const struct sel_col *cols;
+  char sql[512];
+  char limit_buf[24];
+  const char *params[2];
+  int nparams = 0;
+  PGresult *res;
+  enum dbt_storage_status st = DBT_ST_OK;
+  size_t len = 0;
+  long n;
+
+  if (table <= DBT_TABLE_NONE || table > DBT_TABLE_INCIDENTS)
+    return DBT_ST_INVALID;
+
+  switch (table)
+    {
+    case DBT_TABLE_RUNS:          cols = sel_runs; break;
+    case DBT_TABLE_RUN_INSTANCES: cols = sel_instances; break;
+    case DBT_TABLE_INCIDENTS:     cols = sel_incidents; break;
+    default:                      cols = sel_training; break;
+    }
+
+  /* Build the SELECT list from the whitelist. */
+  {
+    size_t off = 0;
+
+    off += (size_t) snprintf (sql + off, sizeof sql - off, "SELECT ");
+    for (int i = 0; cols[i].name != NULL && off < sizeof sql - 32; i++)
+      {
+        off += (size_t) snprintf (sql + off, sizeof sql - off, "%s%s",
+                                  i > 0 ? ", " : "", cols[i].name);
+      }
+    off += (size_t) snprintf (sql + off, sizeof sql - off,
+                              " FROM %s", tbl_name[table]);
+    if (where_col != NULL)
+      off += (size_t) snprintf (sql + off, sizeof sql - off,
+                                " WHERE %s = $1", where_col);
+    snprintf (sql + off, sizeof sql - off, " ORDER BY id LIMIT $%d",
+              where_col != NULL ? 2 : 1);
+  }
+
+  snprintf (limit_buf, sizeof limit_buf, "%ld", limit);
+  if (where_col != NULL)
+    {
+      params[0] = where_val;
+      params[1] = limit_buf;
+      nparams = 2;
+    }
+  else
+    {
+      params[0] = limit_buf;
+      nparams = 1;
+    }
+  (void) where_is_num;   /* the column type is implied by the whitelist */
+
+  if (!ensure_connected ())
+    return DBT_ST_TRANSPORT;
+
+  res = PQexecParams (pg.conn, sql, nparams, NULL, params, NULL, NULL, 0);
+  if (res == NULL || PQresultStatus (res) != PGRES_TUPLES_OK)
+    {
+      note_pg_error ();
+      if (res != NULL)
+        PQclear (res);
+      return DBT_ST_TRANSPORT;
+    }
+
+  n = PQntuples (res);
+  *count = n;
+  if (n == 0)
+    {
+      PQclear (res);
+      return DBT_ST_EMPTY;
+    }
+
+  for (long r = 0; r < n && len < cap; r++)
+    {
+      int ncols = PQnfields (res);
+
+      if (r > 0 && len < cap)
+        out[len++] = ',';
+      if (len < cap)
+        out[len++] = '{';
+      for (int c = 0; c < ncols && len < cap - 2; c++)
+        {
+          const char *v = PQgetvalue (res, r, c);
+          bool isnull = PQgetisnull (res, r, c);
+
+          if (c > 0)
+            out[len++] = ',';
+          len = append_json_string (out, cap, len, cols[c].name);
+          if (len >= cap)
+            break;
+          out[len++] = ':';
+          if (isnull)
+            {
+              if (len + 4 < cap)
+                {
+                  memcpy (out + len, "null", 4);
+                  len += 4;
+                }
+            }
+          else if (cols[c].kind == SEL_TEXT)
+            len = append_json_string (out, cap, len, v);
+          else
+            {
+              /* NUM and JSONB render raw */
+              size_t vl = strlen (v);
+
+              if (len + vl < cap)
+                {
+                  memcpy (out + len, v, vl);
+                  len += vl;
+                }
+            }
+        }
+      if (len < cap)
+        out[len++] = '}';
+    }
+  if (len < cap)
+    out[len] = '\0';
+  else
+    out[cap - 1] = '\0';
+
+  PQclear (res);
+  return st;
+}
+
 bool
 pg_connected (void)
 {

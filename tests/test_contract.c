@@ -250,12 +250,54 @@ test_invalid_tables (void)
 }
 
 static void
-test_select_refused (void)
+test_select (void)
 {
-  parse ("{\"select\": \"runs\", \"where\": {}}");
+  /* The read half (phase A3): table + optional where + optional
+   * limit, with a per-table column whitelist. */
+  parse ("{\"select\": \"runs\"}");
+  CHECK (req.kind == DBT_REQ_SELECT);
+  CHECK (req.table == DBT_TABLE_RUNS);
+  CHECK (req.sel_where_col == NULL);
+  CHECK (req.sel_has_limit == false);
+  CHECK (req.sel_limit == 1024);
+
+  parse ("{\"select\": \"run_instances\", \"where\": {\"run_id\": 17},"
+         " \"limit\": 64}");
+  CHECK (req.kind == DBT_REQ_SELECT);
+  CHECK (req.table == DBT_TABLE_RUN_INSTANCES);
+  CHECK_STR (req.sel_where_col, "run_id");
+  CHECK_STR (req.sel_where_val, "17");
+  CHECK (req.sel_where_is_num == true);
+  CHECK (req.sel_has_limit == true);
+  CHECK (req.sel_limit == 64);
+
+  parse ("{\"select\": \"training_data\", \"where\": {\"checksum\":"
+         " \"abcdef\"}}");
+  CHECK (req.kind == DBT_REQ_SELECT);
+  CHECK_STR (req.sel_where_col, "checksum");
+  CHECK_STR (req.sel_where_val, "abcdef");
+  CHECK (req.sel_where_is_num == false);
+
+  /* Column outside the whitelist of the table. */
+  parse ("{\"select\": \"runs\", \"where\": {\"descriptor\": {}}}");
   CHECK (req.kind == DBT_REQ_INVALID);
-  CHECK (req.invalid == DBT_INVALID_SELECT);
-  CHECK_STR (req.invalid_detail, "select");
+  CHECK (req.invalid == DBT_INVALID_FIELD);
+  CHECK_STR (req.invalid_detail, "descriptor");
+
+  /* Unknown table. */
+  parse ("{\"select\": \"nope\"}");
+  CHECK (req.invalid == DBT_INVALID_TABLE);
+
+  /* A select never carries a row. */
+  parse ("{\"select\": \"runs\", \"row\": {}}");
+  CHECK (req.kind == DBT_REQ_INVALID);
+  CHECK (req.invalid == DBT_INVALID_KEY);
+  CHECK_STR (req.invalid_detail, "row");
+
+  /* The limit is capped. */
+  parse ("{\"select\": \"runs\", \"limit\": 999999}");
+  CHECK (req.kind == DBT_REQ_SELECT);
+  CHECK (req.sel_limit == 4096);
 }
 
 static void
@@ -411,7 +453,7 @@ main (void)
   test_status_request ();
   test_invalid_lines ();
   test_invalid_tables ();
-  test_select_refused ();
+  test_select ();
   test_unknown_keys ();
   test_missing_and_mistyped_fields ();
   test_checksum_rules ();

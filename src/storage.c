@@ -214,6 +214,29 @@ dbt_insert_runs (const struct dbt_row_runs *row, long long *id)
   return st;
 }
 
+/* Read half (phase A3): delegate to the libpq backend; without the
+ * driver the read is a transport failure, like any other op. */
+enum dbt_storage_status
+dbt_select (enum dbt_table table, const char *where_col,
+            const char *where_val, bool where_is_num, long limit,
+            char *out, size_t cap, long *count)
+{
+#ifdef HAVE_LIBPQ
+  return pg_select (table, where_col, where_val, where_is_num, limit,
+                    out, cap, count);
+#else
+  (void) table;
+  (void) where_col;
+  (void) where_val;
+  (void) where_is_num;
+  (void) limit;
+  (void) out;
+  (void) cap;
+  (void) count;
+  return unavailable ();
+#endif
+}
+
 enum dbt_storage_status
 dbt_insert_run_instances (const struct dbt_row_instances *row,
                           long long *id)
