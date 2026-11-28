@@ -37,6 +37,8 @@ struct dbt_counters
     long runs;
     long run_instances;
     long training_data;
+    long incidents;
+    long ingest_jobs;
     long duplicates;
     long invalid;
   };
@@ -54,6 +56,9 @@ enum dbt_storage_status dbt_insert_run_instances (
                                 long long *id);
 enum dbt_storage_status dbt_insert_incidents (
                                const struct dbt_row_incident *row,
+                                         long long *id);
+enum dbt_storage_status dbt_insert_ingest_jobs (
+                               const struct dbt_row_ingest *row,
                                          long long *id);
 enum dbt_storage_status dbt_insert_training_data (
                                 const struct dbt_row_training *row,

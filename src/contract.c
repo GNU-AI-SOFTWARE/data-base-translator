@@ -36,6 +36,7 @@ dbt_invalid_reason (enum dbt_invalid reason)
     case DBT_INVALID_CHECKSUM: return "checksum";
     case DBT_INVALID_SELECT:  return "select";
     case DBT_INVALID_TOOLONG: return "toolong";
+    case DBT_INVALID_VALUE:   return "value";
     }
   return "line";
 }
@@ -676,6 +677,67 @@ bind_incidents (const struct field *fields, int nfields,
   return 0;
 }
 
+/* ingest_jobs (phase B3): one journal row per source and per run. */
+static int
+bind_ingest (const struct field *fields, int nfields,
+             struct dbt_request *req)
+{
+  const struct field *u = find (fields, nfields, "source_url");
+  const struct field *s = find (fields, nfields, "status");
+  const struct field *n = find (fields, nfields, "records_added");
+  struct dbt_row_ingest *r = &req->row.ingest;
+
+  if (u == NULL || u->type != F_STR)
+    {
+      req->invalid = u == NULL ? DBT_INVALID_FIELD : DBT_INVALID_TYPE;
+      strcpy (req->invalid_detail, "source_url");
+      return -1;
+    }
+  r->source_url = u->str;
+  if (s == NULL || s->type != F_STR)
+    {
+      req->invalid = s == NULL ? DBT_INVALID_FIELD : DBT_INVALID_TYPE;
+      strcpy (req->invalid_detail, "status");
+      return -1;
+    }
+  if (strcmp (s->str, "ok") != 0 && strcmp (s->str, "skipped") != 0
+      && strcmp (s->str, "duplicate") != 0 && strcmp (s->str, "error") != 0)
+    {
+      req->invalid = DBT_INVALID_VALUE;
+      strcpy (req->invalid_detail, "status");
+      return -1;
+    }
+  r->status = s->str;
+  if (n == NULL || n->type != F_NUM)
+    {
+      req->invalid = n == NULL ? DBT_INVALID_FIELD : DBT_INVALID_TYPE;
+      strcpy (req->invalid_detail, "records_added");
+      return -1;
+    }
+  r->records_added = strtol (n->num, NULL, 10);
+  if (r->records_added < 0)
+    {
+      req->invalid = DBT_INVALID_VALUE;
+      strcpy (req->invalid_detail, "records_added");
+      return -1;
+    }
+
+  /* Unknown keys are refused, as for every frozen table. */
+  for (int i = 0; i < nfields; i++)
+    {
+      const char *k = fields[i].key;
+
+      if (strcmp (k, "source_url") != 0 && strcmp (k, "status") != 0
+          && strcmp (k, "records_added") != 0)
+        {
+          req->invalid = DBT_INVALID_KEY;
+          set_detail (req, k);
+          return -1;
+        }
+    }
+  return 0;
+}
+
 static int
 bind_runs (const struct field *fields, int nfields,
            struct dbt_request *req)
@@ -1237,6 +1299,8 @@ dbt_parse (const char *line, size_t len,
       static const char *const cols_inc[] = { "id", "run_id", NULL };
       static const char *const cols_tr[] =
         { "id", "checksum", NULL };
+      static const char *const cols_ingest[] =
+        { "id", "source_url", NULL };
       const char *const *cols = NULL;
 
       if (have_row)
@@ -1264,6 +1328,11 @@ dbt_parse (const char *line, size_t len,
         {
           req->table = DBT_TABLE_TRAINING_DATA;
           cols = cols_tr;
+        }
+      else if (strcmp (table_name, "ingest_jobs") == 0)
+        {
+          req->table = DBT_TABLE_INGEST_JOBS;
+          cols = cols_ingest;
         }
       else
         {
@@ -1325,6 +1394,12 @@ dbt_parse (const char *line, size_t len,
     {
       req->table = DBT_TABLE_INCIDENTS;
       if (bind_incidents (fields, nfields, req) < 0)
+        return;
+    }
+  else if (strcmp (table_name, "ingest_jobs") == 0)
+    {
+      req->table = DBT_TABLE_INGEST_JOBS;
+      if (bind_ingest (fields, nfields, req) < 0)
         return;
     }
   else

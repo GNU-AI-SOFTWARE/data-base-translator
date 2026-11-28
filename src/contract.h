@@ -50,6 +50,7 @@ enum dbt_table
     DBT_TABLE_RUN_INSTANCES,
     DBT_TABLE_TRAINING_DATA,
     DBT_TABLE_INCIDENTS,
+    DBT_TABLE_INGEST_JOBS,   /* phase B3: /entrainement --from journal */
   };
 
 /* --- Machine readable reasons of the "invalid" response -------------- */
@@ -64,6 +65,7 @@ enum dbt_invalid
     DBT_INVALID_CHECKSUM,  /* not 64 lowercase hexadecimal characters */
     DBT_INVALID_SELECT,    /* retired: select is served since A3 */
     DBT_INVALID_TOOLONG,   /* instruction line exceeds DBT_MAX_LINE */
+    DBT_INVALID_VALUE,     /* field present, value out of range */
   };
 
 /* Short stable token of a reason ("checksum", "json", ...), as it
@@ -111,6 +113,13 @@ struct dbt_row_incident
     const char *kind;                 /* required: crash|timeout|restart */
   };
 
+struct dbt_row_ingest
+  {
+    const char *source_url;           /* required */
+    const char *status;               /* required: ok|skipped|duplicate|error */
+    long        records_added;        /* required, >= 0 */
+  };
+
 struct dbt_request
   {
     enum dbt_kind   kind;
@@ -125,6 +134,7 @@ struct dbt_request
         struct dbt_row_instances  instances;
         struct dbt_row_training   training;
         struct dbt_row_incident   incidents;
+        struct dbt_row_ingest     ingest;
       } row;
     /* When kind is DBT_REQ_SELECT: an optional single-column equality
      * filter.  Both strings reference the parse arena; the column is

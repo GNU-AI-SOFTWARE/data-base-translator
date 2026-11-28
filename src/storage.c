@@ -108,6 +108,17 @@ dbt_schema_ddl (void)
     "    detected_at TIMESTAMPTZ NOT NULL DEFAULT now()\n"
     ");\n"
     "\n"
+    "-- Ingest jobs of /entrainement --from (phase B3): append-only, one\n"
+    "-- row per source and per run; the latest row of a source_url is its\n"
+    "-- state (detected_at plays last_run).\n"
+    "CREATE TABLE IF NOT EXISTS ingest_jobs (\n"
+    "    id            BIGSERIAL PRIMARY KEY,\n"
+    "    source_url    TEXT NOT NULL,\n"
+    "    detected_at   TIMESTAMPTZ NOT NULL DEFAULT now(),  -- last_run\n"
+    "    status        TEXT NOT NULL,               -- ok | skipped | duplicate | error\n"
+    "    records_added INT NOT NULL DEFAULT 0\n"
+    ");\n"
+    "\n"
     "-- Users allowed in the remote mode (inference-translator)\n"
     "CREATE TABLE IF NOT EXISTS users (\n"
     "    id          BIGSERIAL PRIMARY KEY,\n"
@@ -272,6 +283,25 @@ dbt_insert_incidents (const struct dbt_row_incident *row, long long *id)
   st = unavailable ();
 #endif
   if (st == DBT_ST_INVALID)
+    dbt_state.counters.invalid++;
+  return st;
+}
+
+enum dbt_storage_status
+dbt_insert_ingest_jobs (const struct dbt_row_ingest *row, long long *id)
+{
+  enum dbt_storage_status st;
+
+#ifdef HAVE_LIBPQ
+  st = pg_insert_ingest (row, id);
+#else
+  (void) row;
+  (void) id;
+  st = unavailable ();
+#endif
+  if (st == DBT_ST_OK)
+    dbt_state.counters.ingest_jobs++;
+  else if (st == DBT_ST_INVALID)
     dbt_state.counters.invalid++;
   return st;
 }

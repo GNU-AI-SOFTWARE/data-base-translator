@@ -71,6 +71,10 @@ build_status (void)
                        c->duplicates);
   if (n + 1 < sizeof ops_slot)
     ops_slot[n++] = ',';
+  n = dbt_json_number (ops_slot, n, sizeof ops_slot, "ingest_jobs",
+                       c->ingest_jobs);
+  if (n + 1 < sizeof ops_slot)
+    ops_slot[n++] = ',';
   n = dbt_json_number (ops_slot, n, sizeof ops_slot, "invalid",
                        c->invalid);
   w = snprintf (ops_slot + n, sizeof ops_slot - n, "}}");
@@ -182,6 +186,9 @@ ops_process_line (const char *line, size_t len)
       break;
     case DBT_TABLE_INCIDENTS:
       st = dbt_insert_incidents (&req.row.incidents, &id);
+      break;
+    case DBT_TABLE_INGEST_JOBS:
+      st = dbt_insert_ingest_jobs (&req.row.ingest, &id);
       break;
     default:
       st = DBT_ST_INVALID;               /* unreachable by the parser */

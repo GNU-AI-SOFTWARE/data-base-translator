@@ -239,6 +239,33 @@ test_invalid_tables (void)
   CHECK (!req.row.incidents.has_instance_id);
   CHECK_STR (req.row.incidents.kind, "crash");
 
+  /* ingest_jobs (phase B3): the /entrainement --from journal. */
+  parse ("{\"table\": \"ingest_jobs\", \"row\": {\"source_url\":"
+         " \"hf://buckets/o/b/f.txt\", \"status\": \"ok\","
+         " \"records_added\": 12}}");
+  CHECK (req.kind == DBT_REQ_INSERT);
+  CHECK (req.table == DBT_TABLE_INGEST_JOBS);
+  CHECK_STR (req.row.ingest.source_url, "hf://buckets/o/b/f.txt");
+  CHECK_STR (req.row.ingest.status, "ok");
+  CHECK (req.row.ingest.records_added == 12);
+
+  parse ("{\"table\": \"ingest_jobs\", \"row\": {\"source_url\": \"u\","
+         " \"status\": \"weird\", \"records_added\": 1}}");
+  CHECK (req.kind == DBT_REQ_INVALID);
+  CHECK (req.invalid == DBT_INVALID_VALUE);
+  CHECK_STR (req.invalid_detail, "status");
+
+  parse ("{\"table\": \"ingest_jobs\", \"row\": {\"source_url\": \"u\","
+         " \"status\": \"ok\", \"records_added\": 1, \"oops\": 2}}");
+  CHECK (req.invalid == DBT_INVALID_KEY);
+  CHECK_STR (req.invalid_detail, "oops");
+
+  parse ("{\"select\": \"ingest_jobs\", \"where\": {\"source_url\":"
+         " \"hf://x\"}}");
+  CHECK (req.kind == DBT_REQ_SELECT);
+  CHECK (req.table == DBT_TABLE_INGEST_JOBS);
+  CHECK_STR (req.sel_where_col, "source_url");
+
   parse ("{\"table\": \"users\", \"row\": {}}");
   CHECK (req.invalid == DBT_INVALID_TABLE);      /* phase 5 */
 

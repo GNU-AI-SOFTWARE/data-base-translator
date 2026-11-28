@@ -54,6 +54,7 @@ static struct
 #define STMT_INS_INSTANCES  "dbt_ins_run_instances"
 #define STMT_INS_TRAINING   "dbt_ins_training_data"
 #define STMT_INS_INCIDENTS  "dbt_ins_incidents"
+#define STMT_INS_INGEST     "dbt_ins_ingest_jobs"
 #define STMT_SEL_CHECKSUM   "dbt_sel_checksum"
 
 /* PostgreSQL type OIDs, so the server never has to infer: the
@@ -112,10 +113,14 @@ prepare_statements (void)
   static const char ins_inc_sql[] =
     "INSERT INTO incidents (run_id, instance_id, kind)"
     " VALUES ($1, $2, $3) RETURNING id";
+  static const Oid ins_ing_types[3] = { OID_TEXT, OID_TEXT, OID_INT4 };
+  static const char ins_ing_sql[] =
+    "INSERT INTO ingest_jobs (source_url, status, records_added)"
+    " VALUES ($1, $2, $3) RETURNING id";
   static const char sel_sql[] =
     "SELECT id FROM training_data WHERE checksum = $1";
 
-  PGresult *res[5];
+  PGresult *res[6];
   bool ok = true;
 
   res[0] = PQprepare (pg.conn, STMT_INS_RUNS, ins_runs_sql, 3,
@@ -128,16 +133,16 @@ prepare_statements (void)
                       ins_inc_types);
   res[4] = PQprepare (pg.conn, STMT_SEL_CHECKSUM, sel_sql, 1,
                       sel_types);
+  res[5] = PQprepare (pg.conn, STMT_INS_INGEST, ins_ing_sql, 3,
+                      ins_ing_types);
 
-  for (int i = 0; i < 5; i++)
+  for (int i = 0; i < 6; i++)
     {
       if (res[i] == NULL || PQresultStatus (res[i]) != PGRES_COMMAND_OK)
         ok = false;
       if (res[i] != NULL)
         PQclear (res[i]);
     }
-  res[4] = NULL;
-  (void) res[4];
 
   return ok;
 }
@@ -483,6 +488,12 @@ static const struct sel_col sel_training[] =
     { "id", SEL_NUM }, { "source_url", SEL_TEXT },
     { "http_status", SEL_NUM }, { "checksum", SEL_TEXT }, { NULL, 0 }
   };
+static const struct sel_col sel_ingest[] =
+  {
+    { "id", SEL_NUM }, { "source_url", SEL_TEXT },
+    { "detected_at", SEL_TEXT }, { "status", SEL_TEXT },
+    { "records_added", SEL_NUM }, { NULL, 0 }
+  };
 
 /* Append S to OUT as a JSON string (with quotes, escaped). */
 static size_t
@@ -533,7 +544,8 @@ pg_select (enum dbt_table table, const char *where_col,
            char *out, size_t cap, long *count)
 {
   static const char *const tbl_name[] =
-    { "", "runs", "run_instances", "training_data", "incidents" };
+    { "", "runs", "run_instances", "training_data", "incidents",
+      "ingest_jobs" };
   const struct sel_col *cols;
   char sql[512];
   char limit_buf[24];
@@ -544,7 +556,7 @@ pg_select (enum dbt_table table, const char *where_col,
   size_t len = 0;
   long n;
 
-  if (table <= DBT_TABLE_NONE || table > DBT_TABLE_INCIDENTS)
+  if (table <= DBT_TABLE_NONE || table > DBT_TABLE_INGEST_JOBS)
     return DBT_ST_INVALID;
 
   switch (table)
@@ -552,6 +564,7 @@ pg_select (enum dbt_table table, const char *where_col,
     case DBT_TABLE_RUNS:          cols = sel_runs; break;
     case DBT_TABLE_RUN_INSTANCES: cols = sel_instances; break;
     case DBT_TABLE_INCIDENTS:     cols = sel_incidents; break;
+    case DBT_TABLE_INGEST_JOBS:   cols = sel_ingest; break;
     default:                      cols = sel_training; break;
     }
 
@@ -659,6 +672,20 @@ pg_select (enum dbt_table table, const char *where_col,
 
   PQclear (res);
   return st;
+}
+
+enum dbt_storage_status
+pg_insert_ingest (const struct dbt_row_ingest *row, long long *id)
+{
+  char nbuf[24];
+  const char *values[3];
+  const int lengths[3] = { 0, 0, 0 };
+
+  snprintf (nbuf, sizeof nbuf, "%ld", row->records_added);
+  values[0] = row->source_url;
+  values[1] = row->status;
+  values[2] = nbuf;
+  return exec_prepared_id (STMT_INS_INGEST, values, lengths, 3, id);
 }
 
 bool

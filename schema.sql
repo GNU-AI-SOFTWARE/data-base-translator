@@ -51,6 +51,17 @@ CREATE TABLE IF NOT EXISTS incidents (
     detected_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Ingest jobs of /entrainement --from (phase B3): append-only, one
+-- row per source and per run; the latest row of a source_url is its
+-- state (detected_at plays last_run).
+CREATE TABLE IF NOT EXISTS ingest_jobs (
+    id            BIGSERIAL PRIMARY KEY,
+    source_url    TEXT NOT NULL,
+    detected_at   TIMESTAMPTZ NOT NULL DEFAULT now(),  -- last_run
+    status        TEXT NOT NULL,               -- ok | skipped | duplicate | error
+    records_added INT NOT NULL DEFAULT 0
+);
+
 -- Users allowed in the remote mode (inference-translator)
 CREATE TABLE IF NOT EXISTS users (
     id          BIGSERIAL PRIMARY KEY,
